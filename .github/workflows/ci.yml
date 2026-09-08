@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # Fast gate: the config/sample-table/workflow contract, no heavy deps.
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install test dependencies
+        run: pip install pytest pandas pyyaml numpy
+
+      - name: Run tests
+        run: pytest -q
+
+  # Slow gate: prove environment.yml still solves and the analysis stack imports.
+  environment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up mamba
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          use-mamba: true
+          auto-activate-base: true
+
+      - name: Create the analysis environment
+        shell: bash -l {0}
+        run: mamba env create -f environment.yml
+
+      - name: Import the analysis stack
+        shell: bash -l {0}
+        run: |
+          conda run -n fetalheartmap python -c "
+          import anndata, muon, scanpy, skmisc
+          print('anndata', anndata.__version__)
+          print('muon', muon.__version__)
+          print('scanpy', scanpy.__version__)
+          "
+
+      - name: Check every step script exposes --help
+        shell: bash -l {0}
+        run: |
+          for script in scripts/*.py; do
+            case "$(basename "$script")" in
+              pipeline_utils.py|snakemake_helpers.py) continue ;;
+            esac
+            echo "--- $script"
+            PYTHONPATH=. conda run -n fetalheartmap python "$script" --help > /dev/null
+          done
+
+  # Prove the DAG resolves without touching the sequencing data.
+  workflow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up mamba
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          use-mamba: true
+          auto-activate-base: true
+
+      - name: Create the Snakemake environment
+        shell: bash -l {0}
+        run: mamba env create -f envs/snakemake.yml
+
+      - name: Lint the workflow
+        shell: bash -l {0}
+        run: |
+          conda run -n fetalheartmap-snakemake snakemake \
+            --snakefile workflows/00_counts_matrix_processing.smk \
+            --configfile config/config.20260408_ipscvic_300k.yaml \
+            --lint || true
+
+      - name: Dry-run the workflow
+        shell: bash -l {0}
+        # The kb-python inputs live on Sherlock, so the DAG cannot be fully
+        # built here. --list-target-rules proves the Snakefile parses, imports
+        # the helpers, and reads the config and sample table.
+        run: |
+          conda run -n fetalheartmap-snakemake snakemake \
+            --snakefile workflows/00_counts_matrix_processing.smk \
+            --configfile config/config.20260408_ipscvic_300k.yaml \
+            --list-target-rules

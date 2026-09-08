@@ -1,0 +1,128 @@
+# Counts-matrix post-processing for the 20260408-FEBVICHIGHIMOI-300kchd-d9-novaseq
+# experiment (iPSC-VIC high-MOI CRISPRi screen, 300k cells, 7 sublibraries, day 9).
+#
+# Paths under references/ and config/ resolve relative to this code directory.
+# Runtime paths (scratch_base, results_base) resolve relative to the directory
+# Snakemake is launched from; set them to absolute paths if you prefer.
+
+analysis_name: 20260408_ipscvic_300k
+scratch_base: scratch
+results_base: results_20260408_ipscvic_300k
+sample_info_file: references/sample_info.20260408_ipscvic_300k.tsv
+
+# Environment the rule scripts run in. Leave `env` empty to use whatever
+# interpreter is already on PATH.
+conda:
+  profile_script: /home/groups/engreitz/Software/anaconda3/etc/profile.d/conda.sh
+  env: /oak/stanford/groups/engreitz/Users/msychen/conda/envs/perturbprocessing
+
+input_paths:
+  # Root of the kb-python output tree written by the upstream perturb-seq
+  # pipeline (github.com/tkzeng/perturb_pipeline). Per-sublibrary GEX and guide
+  # subdirectories come from the `counts_dir` / `counts_subdir` columns of
+  # sample_info_file.
+  kb_output_base: /scratch/users/msychen/20260407_mergedfastq_barcoderanksinflection_300kround3feb_ipscvicd9_newguidelist_analysis
+
+  # Ensembl <-> symbol dictionaries (numpy .npy pickled dicts, GENCODE v43).
+  # Used only when var_names are Ensembl IDs. Set to "" to skip symbol mapping.
+  ensembl_to_symbol: /oak/stanford/groups/engreitz/Users/opushkar/genome/ensembl_to_symbol_dict_v43.npy
+  symbol_to_ensembl: /oak/stanford/groups/engreitz/Users/opushkar/genome/symbol_to_ensembl_dict_v43.npy
+
+  # Cell-cycle gene lists (Tirosh et al. 2016), shipped with this repo.
+  cell_cycle_s_genes: references/cell_cycle_s_genes.human.txt
+  cell_cycle_g2m_genes: references/cell_cycle_g2m_genes.human.txt
+
+# --- Step 1: UMI thresholding -----------------------------------------------
+# Per-sublibrary bounds live in sample_info_file (min_umi_threshold /
+# max_umi_threshold). The lower bounds are the barcode-rank inflection points
+# reported by the upstream pipeline's cell calling.
+umi_filtering:
+  plot_rank_curve: true
+
+# --- Step 2: QC filtering ----------------------------------------------------
+qc_filtering:
+  reference: human            # human | mouse; picks MT-/RPS/RPL vs Mt-/Rps/Rpl
+  mt_threshold: 15            # max % mitochondrial UMIs per cell
+  ribo_threshold: 4           # max % ribosomal UMIs per cell
+  n_mads_total_counts: 4      # MADs from median on log1p_total_counts
+  n_mads_n_genes: 4           # MADs from median on log1p_n_genes_by_counts
+  filter_outliers: true
+  filter_cells_by_min_genes: false
+  min_genes_per_cell: 10
+  min_counts_per_cell: 500
+  min_cells_per_gene: 10
+  min_counts_per_gene: 100
+
+# --- Step 3a: concatenation --------------------------------------------------
+concatenate:
+  join: outer                 # union of genes across sublibraries, zero-filled
+  make_barcodes_unique: true  # suffix barcodes with the sublibrary label
+
+# --- Step 3b / 3b-i: CellRanger-format export --------------------------------
+cellranger_export:
+  # Counts are rounded (not truncated) to int32 at write time.
+  gene_feature_type: Gene Expression
+  guide_feature_type: CRISPR Guide Capture
+  # Strip Ensembl version suffixes (ENSG00000227232.6 -> ENSG00000227232).
+  strip_ensembl_versions: true
+  # Spot-check gene reported in the per-sublibrary matrix stats; "" to skip.
+  spot_check_gene_id: ENSG00000075624   # ACTB
+
+# --- Step 4: clustering + annotation ----------------------------------------
+clustering:
+  random_seed: 0              # seeds PCA, k-NN, UMAP, Leiden and gene scoring
+  target_sum: 10000           # CP10k normalisation
+  n_top_genes: 3000
+  hvg_flavor: seurat_v3
+  hvg_batch_key: sublib       # "" to ignore batch when selecting HVGs
+  n_pcs: 50                   # PCs computed
+  n_pcs_use: 30               # PCs used for the neighbour graph
+  n_neighbors: 15
+  leiden_resolutions: [0.1, 0.25, 0.5, 1.0]
+  dotplot_resolution: 0.25    # resolution used for the marker dotplots
+  regress_cell_cycle: false   # see README: the published run does NOT regress
+  marker_panels:
+    ipsc: [SOX2, NANOG, POU5F1, KLF4, MYC, LIN28A]
+    vic: [VIM, COL1A1, COL3A1, DCN, LUM, POSTN, COL11A1, PDGFRA, ACTA2, TAGLN]
+    ec: [CDH5, PECAM1, CD34, KDR, ANGPT2,
+         SOX17, CXCR4, DLL4, EFNB2,
+         NR2F2, NT5E, FLRT2]
+
+# --- Slurm resources ---------------------------------------------------------
+# Consumed by submit.sh via --cluster. runtime is in minutes.
+resources:
+  default:
+    mem_mb: 65536
+    threads: 2
+    runtime: 720
+    slurm_partition: engreitz
+  umi_filter:
+    mem_mb: 262144
+    threads: 4
+    runtime: 1440
+    slurm_partition: bigmem
+  qc_filter:
+    mem_mb: 131072
+    threads: 4
+    runtime: 1440
+    slurm_partition: engreitz
+  concatenate:
+    mem_mb: 131072
+    threads: 4
+    runtime: 1440
+    slurm_partition: engreitz
+  cellranger_export:
+    mem_mb: 65536
+    threads: 2
+    runtime: 720
+    slurm_partition: engreitz
+  master_gene_list:
+    mem_mb: 65536
+    threads: 1
+    runtime: 120
+    slurm_partition: engreitz
+  clustering:
+    mem_mb: 131072
+    threads: 4
+    runtime: 1440
+    slurm_partition: engreitz

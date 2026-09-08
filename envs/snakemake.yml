@@ -1,0 +1,19 @@
+# Orchestrator environment. Snakemake is kept separate from the analysis
+# environment so the two solve independently -- submit.sh runs from this env
+# and each rule activates the analysis env via config.conda.
+#
+#   conda activate mamba-env
+#   mamba env create -f envs/snakemake.yml
+#   conda activate fetalheartmap-snakemake
+#
+# Pinned to 7.32.4, the version used for the published run. submit.sh uses the
+# Snakemake 7 `--cluster` interface, not the 8+ `--executor slurm` plugin.
+name: fetalheartmap-snakemake
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - snakemake=7.32.4
+  - pyyaml=6.0.2
+  - pandas=2.2.3

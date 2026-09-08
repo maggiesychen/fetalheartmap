@@ -1,4 +1,44 @@
+# Data files (too large for GitHub)
+*.h5ad
+*.h5mu
+*.h5
+*.bam
+*.bai
+*.fastq*
+*.bed
+*.bigwig
+*.mtx
+*.mtx.gz
+*.npy
+
+# Large outputs
+results/
+results_*/
+scratch/
+figures/
+plots/
+deliverables/
+
+# Logs
+logs/
+*.log
+*.out
+*.err
+slurm-*.out
+
+# Snakemake
+.snakemake/
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
+.pytest_cache/
 .ipynb_checkpoints/
+
+# Credentials (never commit these)
+*.pem
+.env
+
+# System files
 .DS_Store

@@ -1,0 +1,15 @@
+sublibrary	sample_id	sample_type	counts_dir	counts_subdir	min_umi_threshold	max_umi_threshold	exclude
+sublib1	300k:gex_sublib1	gex	merged:iPSC-VICs_sublibrary_1_merged	kb_all_main_raw/counts_unfiltered_modified	1921	75000	False
+sublib1	300k:guide_sublib1	guide	merged:splitseq_guide_pool_sublibrary_1_merged	kb_guide_main_raw/counts_unfiltered_modified			False
+sublib2	300k:gex_sublib2	gex	merged:iPSC-VICs_sublibrary_2_merged	kb_all_main_raw/counts_unfiltered_modified	2414	75000	False
+sublib2	300k:guide_sublib2	guide	merged:splitseq_guide_pool_sublibrary_2_merged	kb_guide_main_raw/counts_unfiltered_modified			False
+sublib3	300k:gex_sublib3	gex	merged:iPSC-VICs_sublibrary_3_merged	kb_all_main_raw/counts_unfiltered_modified	2006	75000	False
+sublib3	300k:guide_sublib3	guide	merged:splitseq_guide_pool_sublibrary_3_merged	kb_guide_main_raw/counts_unfiltered_modified			False
+sublib4	300k:gex_sublib4	gex	merged:iPSC-VICs_sublibrary_4_merged	kb_all_main_raw/counts_unfiltered_modified	2345	75000	False
+sublib4	300k:guide_sublib4	guide	merged:splitseq_guide_pool_sublibrary_4_merged	kb_guide_main_raw/counts_unfiltered_modified			False
+sublib5	300k:gex_sublib5	gex	merged:iPSC-VICs_sublibrary_5_merged	kb_all_main_raw/counts_unfiltered_modified	3132	75000	False
+sublib5	300k:guide_sublib5	guide	merged:splitseq_guide_pool_sublibrary_5_merged	kb_guide_main_raw/counts_unfiltered_modified			False
+sublib6	300k:gex_sublib6	gex	merged:iPSC-VICs_sublibrary_6_merged	kb_all_main_raw/counts_unfiltered_modified	2925	75000	False
+sublib6	300k:guide_sublib6	guide	merged:splitseq_guide_pool_sublibrary_6_merged	kb_guide_main_raw/counts_unfiltered_modified			False
+sublib7	300k:gex_sublib7	gex	merged:iPSC-VICs_sublibrary_7_merged	kb_all_main_raw/counts_unfiltered_modified	1719	75000	False
+sublib7	300k:guide_sublib7	guide	merged:splitseq_guide_pool_sublibrary_7_merged	kb_guide_main_raw/counts_unfiltered_modified			False

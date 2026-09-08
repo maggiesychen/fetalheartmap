@@ -1,0 +1,38 @@
+# Analysis environment for the counts-matrix post-processing workflow.
+#
+# Versions are pinned to those of the environment the published run used
+# (/oak/stanford/groups/engreitz/Users/msychen/conda/envs/perturbprocessing).
+#
+#   conda activate mamba-env
+#   mamba env create -f environment.yml
+#   conda activate fetalheartmap
+#
+# Snakemake itself lives in a separate environment; see envs/snakemake.yml.
+name: fetalheartmap
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.10.19
+  - h5py=3.15.1
+  - matplotlib=3.10.8
+  - numpy=2.2.6
+  - pandas=2.3.3
+  - python-igraph=1.0.0
+  - scikit-learn=1.7.2
+  - scikit-misc=0.5.2
+  - natsort=8.4.0
+  - openpyxl=3.1.5
+  - pytest=8.3.4
+  - pip
+  - pip:
+      - anndata==0.11.4
+      - mudata==0.3.3
+      - muon==0.1.7
+      - numba==0.64.0
+      - pynndescent==0.6.0
+      - pyyaml==6.0.3
+      - scanpy==1.11.5
+      - scipy==1.15.3
+      - seaborn==0.13.2
+      - umap-learn==0.5.11
