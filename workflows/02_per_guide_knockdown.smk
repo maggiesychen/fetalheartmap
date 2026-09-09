@@ -10,10 +10,9 @@
 # agreement (reported by 07d) is evidence the knockdown is real rather than a
 # modelling artefact.
 #
-# The published figure was built from the cis SCEPTRE run. gRNA assignment is
-# identical across variants -- 0 of 727,847,504 cell x gRNA calls differ once
-# the permuted gRNA row order is aligned -- so `per_guide_knockdown.sceptre_variant`
-# can name any variant stage 01 produced. It defaults to trans_v2.
+# `per_guide_knockdown.sceptre_variant` names the stage-01 variant supplying the
+# gRNA assignment and the pair sets; it defaults to trans_v2. gRNA assignment is
+# identical across variants, so that choice only affects the pair sets.
 #
 # Run with:
 #   CONFIG=config/config.20260408_ipscvic_300k.yaml \

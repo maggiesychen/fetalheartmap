@@ -15,7 +15,7 @@ CRISPRi Perturb-seq screen targeting congenital heart disease (CHD) genes.
 
 ---
 
-## What this stage does
+## Stage 00 — counts-matrix processing
 
 Picks up the raw per-sublibrary `adata.h5ad` files written by
 [`tkzeng/perturb_pipeline`](https://github.com/tkzeng/perturb_pipeline) and
@@ -84,6 +84,116 @@ so the sublibraries end up with different gene sets — for the 2026-04-08 run,
 directories and indexes features **positionally**, so mismatched
 `features.tsv.gz` files corrupt every result rather than raising. The
 `validate_cellranger_features` rule fails loudly if they ever diverge.
+
+---
+
+## Stage 01 — SCEPTRE trans differential expression
+
+Tests every perturbation against every protein-coding gene genome-wide, with a
+calibration check on negative-control pairs and a power check on the TSS
+positive controls. All published results come from the trans analysis.
+
+```
+CellRanger matrices (stage 00, feature-corrected)
+  │
+  ├─ 05_extract_sceptre_covariates.py   rule: extract_sceptre_covariates
+  │     S_score, G2M_score, pct_ribo, pct_mito read out of the clustered
+  │     AnnData, in CellRanger import order.
+  │     → sceptre_ondisc/sceptre_extra_covariates.csv
+  │
+  ├─ 06c_validate_cell_ordering.py      rule: validate_cell_ordering
+  │     Confirms row i of that CSV is sceptre cell i. The covariate join is
+  │     positional with no barcode key, so this check is load-bearing.
+  │
+  ├─ 06a_import_into_sceptre.R          rule: import_into_sceptre
+  │     import_data_from_cellranger(moi="high"), ondisc-backed so the full
+  │     240k x 26k matrix never has to be held in memory.
+  │     → sceptre_ondisc/{sceptre_object.rds, gene.odm, grna.odm}
+  │
+  ├─ 06b_set_analysis_parameters.R      rule: set_analysis_parameters
+  │     Attaches the covariates, builds the trans pair set, restricts responses
+  │     to protein-coding genes, sets the association formula explicitly.
+  │     → sceptre_ondisc/sceptre_object_trans_v2.rds
+  │
+  ├─ nextflow sceptre-pipeline          rule: run_sceptre_pipeline
+  │     Wraps `nextflow run timothy-barry/sceptre-pipeline`, which does the
+  │     gRNA assignment and all the association testing. ~12 h wall clock.
+  │     → sceptre/trans_v2/outputs/results_run_*.rds
+  │
+  └─ 06d_export_sceptre_results.R       rule: export_sceptre_results
+        Adds gene symbols and pct_knockdown = 100 * (1 - 2^log2FC).
+        → sceptre/trans_v2/sceptre_trans_v2_*.tsv
+```
+
+Covariate sets and pair types are declared under `sceptre.variants`;
+`sceptre.run_variants` picks which ones `rule all` builds. The default is
+`trans_v2` — cell-state covariates, no Leiden cluster.
+
+### Two things about the model that are easy to get wrong
+
+**The association formula is passed explicitly.** Left to sceptre's
+auto-construction, `auto_construct_formula_object()` silently drops any
+continuous covariate with ≥ 15 distinct values — which is all four cell-state
+covariates — with no warning and nothing in the printed object summary to show
+it happened.
+
+**gRNA assignment does not use those covariates, deliberately.**
+`assign_grnas()` never reads the association formula; it builds its own default
+adjusting for transcriptome depth, gRNA depth and batch. Cell-state covariates
+belong in the association model because they describe the transcriptomic
+response rather than gRNA capture efficiency, and are potentially downstream of
+the perturbation itself. To override, point
+`sceptre.pipeline.grna_assignment_formula` at an `.rds` holding a formula
+object. Full write-up in the analysis directory at
+`6.sceptre/readmes/20260908-methods.md`.
+
+Also worth knowing: sceptre's built-in `response_p_mito` covariate is
+identically zero here, because the feature-corrected export writes Ensembl IDs
+into the feature *name* column so no `MT-` symbols are visible to sceptre. The
+`pct_mito` supplied by `05_extract_sceptre_covariates.py` is the working
+mitochondrial covariate.
+
+---
+
+## Stage 02 — per-gRNA knockdown
+
+SCEPTRE reports one fold change per target, pooling that target's gRNAs. This
+stage recomputes knockdown one gRNA at a time over the CHD gene panel, by two
+independent estimators — they share the counts and the gRNA assignment but
+nothing else, so their agreement is evidence the knockdown is real rather than
+a modelling artefact.
+
+```
+sceptre object + gRNA assignment matrix (stage 01)
+  │
+  ├─ 07a_per_guide_fold_changes_poisson.R      x2, independent
+  │     Poisson GLM log2FC against sceptre's own null model
+  │     (sceptre book §10.4). One script, two guide sets:
+  │       --guide-set targeting      → the TSS gRNAs
+  │       --guide-set non-targeting  → the empirical null
+  │
+  ├─ 07b_target_gene_expression_per_guide.R
+  │     Model-free CP10K pseudobulk vs a per-gene non-targeting pool
+  │     (NT cells carrying none of that gene's TSS gRNAs).
+  │
+  ├─ 07c_plot_tss_knockdown.py     Mann-Whitney on log2FC → the per-gRNA dots
+  ├─ 07d_plot_nt_vs_tss.py         Mann-Whitney on CP10K  → stars + ordering,
+  │                                and the correlation between the two estimators
+  │
+  └─ 07e_plot_pct_knockdown_bar.py
+        The combined figure. Bars are the mean of each gene's own dots.
+        → per_guide_knockdown/fig_pct_knockdown_bar.svg
+```
+
+`07a` (targeting), `07a` (non-targeting) and `07b` are mutually independent
+despite the numbering, and all three read only stage-01 outputs.
+
+**Percent knockdown is `100 * (1 - 2^log2FC)`, a concave transform.** Do not
+average percentages across gRNAs and compare that to the percentage of a mean
+fold change — average log2 fold changes and convert once. `07e` asserts the
+resulting Jensen inequality, along with four other guards (excluded genes must
+exist, every plotted gene must have dots, each bar must equal the mean of its
+dots to 1e-9, and the gene-label geometry must match the figure spec).
 
 ---
 
@@ -204,6 +314,37 @@ symbol mapping; MT/ribo annotation and the marker panels then do not resolve.
 
 Shipped in `references/` (Tirosh et al. 2016, 42 S and 54 G2M genes).
 
+### 5. gRNA target table — `references/guide_targets.*.tsv`
+
+`grna_id` / `grna_target` (plus `chr`/`start`/`end`), 3,026 gRNAs: 2,826
+targeting across 179 targets, and 200 non-targeting. `grna_target` is an
+Ensembl gene ID for a TSS target, an element name for an enhancer, or the
+literal `non-targeting`. Shipped in `references/`.
+
+### 6. Clustered AnnData, for the SCEPTRE covariates
+
+`sceptre.covariates.clustered_h5ad` supplies `S_score`, `G2M_score`,
+`pct_ribo` and `pct_mito`. Too large to ship (34-50 GB). The published runs
+read the cell-cycle-regressed clustering; those four covariates are
+byte-identical between it and the no-regression output (verified 2026-09-08),
+so either reproduces them. Only `leiden_res0_25` differs between the two — 6
+clusters vs 5 — and the default variant does not use it.
+
+### 7. GENCODE annotation and the R toolchain
+
+`sceptre.gencode_gtf` (GENCODE v43, 53 MB) restricts trans discovery pairs to
+protein-coding responses. `sceptre.r_env` names the R modules and the shared
+library providing `sceptre` 0.10.2, `ondisc` 1.2.0, `data.table` and
+`rtracklayer`. `nextflow` and `java` must be on PATH for the pipeline rule.
+
+Note that library has neither `optparse` nor `getopt`, which is why the R
+scripts parse arguments through `scripts/r_utils.R` instead.
+
+### 8. CHD gene panel — `references/chd_genes.suppt8.tsv`
+
+26 genes with the flags stage 02 uses to pick the main-figure subset. Shipped
+in `references/`.
+
 ---
 
 ## Running
@@ -220,6 +361,22 @@ Per-rule memory, walltime, threads and partition come from the `resources:`
 block of the config; `submit.sh` maps them onto `sbatch`. Cluster stdout/stderr
 land in `{results_base}/logs/cluster/`, per-rule script logs in
 `{results_base}/logs/{rule}/`.
+
+`submit.sh` defaults to stage 00. Select a later stage with `WORKFLOW`, and run
+them in order — each depends on the one before:
+
+```bash
+export CONFIG=config/config.20260408_ipscvic_300k.yaml
+
+WORKFLOW=workflows/00_counts_matrix_processing.smk ./submit.sh
+WORKFLOW=workflows/01_sceptre_trans.smk            ./submit.sh
+WORKFLOW=workflows/02_per_guide_knockdown.smk      ./submit.sh
+```
+
+Stage 01's Nextflow rule asks for a 3-day walltime and only 10 GB, because it
+mostly waits on the subjobs it submits itself. Do not assume `-resume` will
+save you a re-run: changing the analysis parameters changes that rule's input
+hash, and everything downstream of gRNA assignment re-runs with it.
 
 To run everything inside a single allocation instead:
 
