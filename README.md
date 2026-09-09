@@ -13,8 +13,6 @@ CRISPRi Perturb-seq screen targeting congenital heart disease (CHD) genes.
 | `01_sceptre_trans.smk` | SCEPTRE calibration / power / discovery, cis and trans |
 | `02_per_guide_knockdown.smk` | per-gRNA knockdown of the CHD target panel |
 
-Still to come: cNMF and program-level DE, and the paper figures.
-
 ---
 
 ## What this stage does
@@ -238,21 +236,6 @@ export. The pre-correction export is a separate target:
 ./submit.sh cellranger_export_plain
 ```
 
-### Re-running the 2026-04-08 analysis
-
-The step-1 inputs are **no longer on disk**. All 14 `adata.h5ad` files under
-`input_paths.kb_output_base` were removed by the `$SCRATCH` 90-day purge; the
-directory skeleton survives but the files are gone. `--dry-run` therefore stops
-at `umi_filter` with a `MissingInputException`, which is the workflow correctly
-reporting missing inputs rather than a configuration error.
-
-To reproduce from raw reads, re-run
-[`tkzeng/perturb_pipeline`](https://github.com/tkzeng/perturb_pipeline) to
-regenerate those matrices first. The step 1–4 outputs from the original run are
-preserved on Oak under
-`$OAK/Users/msychen/fetalheartmap/20260408-FEBVICHIGHIMOI-300kchd-d9-novaseq/countsmatrices/20260408-postprocessing/`,
-so downstream stages can start from there without re-running this one.
-
 ### Tests
 
 ```bash
@@ -282,64 +265,6 @@ No code changes should be needed.
 
 ---
 
-## Analysis decisions worth knowing before you reuse this
-
-### Clustering does not regress out the cell cycle
-
-`clustering.regress_cell_cycle` is `false`, and the published run's output is
-what every downstream step consumes. A cell-cycle-**regressed** variant was
-explored in the analysis directory
-(`4.clustering/20260420-nocellcycle-clustering.ipynb`, whose filename is
-misleading — it *does* call `regress_out(["S_score","G2M_score"])` and
-`scale(max_value=10)`) and was not carried forward. Turning the flag on also
-scales the data, which changes PCA and every clustering result downstream.
-
-The published run's own sanity check confirmed that the clustered file is
-compatible with the cNMF input:
-
-```
-Combined-clustered h5ad: 240504 cells x 25788 genes
-cNMF input h5ad:         240504 cells x 25788 genes
-obs_names identical after known barcode rename: True
-var_names identical (order + content):          True
-```
-
-### Rounding, not truncating
-
-Counts stay float32 through steps 1–3a and are rounded to int32 only at
-CellRanger export. During the original run, step 2 was once re-run
-**truncating** to int, which zeroed every sub-1.0 count and cost 52 cells and
-1,855 genes in sublibrary 1 alone (45,938 × 25,703 → 45,886 × 23,848). That run
-was abandoned. `03c_convert_to_cellranger.py` rounds, and nothing upstream of it
-casts.
-
-### `seurat_v3` sees non-integer input
-
-Step 4 inherits float32 counts, so
-`highly_variable_genes(flavor="seurat_v3")` logs `expects raw count data, but
-non-integers were found`. Values are near-integer so HVG selection is
-approximately right, but it is not what `seurat_v3` assumes.
-
-### The ribosomal threshold is aggressive
-
-`qc_filtering.ribo_threshold` is 4%, against 5 in the script this was adapted
-from and 12 in the winter 2025 iPSC-VIC screen. It is the single biggest lever
-on final cell count.
-
-### MAD outliers are computed before the MT/ribo filters
-
-…and applied after, so the cutoffs reflect the unfiltered population. Standard
-practice, but the order matters if you change it.
-
-### Notes that disagree with the code
-
-`countsmatrices/filteringparameters.md` in the analysis directory records a UMI
-ceiling of 100,000 for every sublibrary. The run used **75,000**, which is what
-the Slurm logs confirm and what `references/sample_info.*.tsv` records. The
-lower bounds agree. Treat the sample table as truth.
-
----
-
 ## Relationship to the other lab repos
 
 | Repo | Overlap with this stage |
@@ -347,29 +272,6 @@ lower bounds agree. Treat the sample table as truth.
 | [`tkzeng/perturb_pipeline`](https://github.com/tkzeng/perturb_pipeline) | Produces this stage's inputs. FASTQ → kallisto/bustools → cell calling → per-sublibrary `adata.h5ad`. Not vendored here. |
 | [`EngreitzLab/telohaec-genomewide-perturb-seq-analysis`](https://github.com/EngreitzLab/telohaec-genomewide-perturb-seq-analysis) | Same conventions (numbered `.smk` stages, `config/`, `references/`, `scripts/`, `pipeline_utils` + `snakemake_helpers`), and this repo follows them. The *analyses* differ — see below. |
 
-The TeloHAEC repo is a good structural template and a genuine methods reference
-for the later program-level DE stage, but it is **not** a substitute for this
-one:
-
-- **Steps 1–4 (this stage).** TeloHAEC does the equivalent inside
-  `00_fastq_to_sublibrary_h5ad.smk` and `01_combined_matrix_and_cnmf.smk`, but
-  it calls cells *inside* the workflow (`BarcodeRanks_Inflection` on its own
-  kallisto output) rather than taking a UMI floor from an upstream pipeline, and
-  it has no CellRanger-format export at all, because it does not use SCEPTRE.
-- **Guide assignment and DE (steps 5–7 of the analysis).** TeloHAEC contains no
-  SCEPTRE code. It replaces gene-level SCEPTRE testing entirely with matched-cell
-  program DE. There is nothing there to point at for this project's cis/trans
-  SCEPTRE results.
-- **cNMF (steps 8–9).** Both run cNMF, but TeloHAEC uses a modified CPU cNMF
-  (`external/cnmf_modified.py`, K=50/150); this project uses a GPU `halsvar`
-  torch-cNMF at K=30.
-- **Program-level DE.** This is the real overlap. TeloHAEC's
-  `scripts/run_matching_de_batch.R` and this project's `MatchedProgramDE` step
-  are the same method and the same lineage of script — MatchIt propensity
-  matching plus OLS with HC3 robust standard errors. TeloHAEC's
-  `02_program_de.smk` is worth mirroring when that stage is added here.
-
----
 
 ## Changes made when importing these scripts into the repo
 
@@ -405,21 +307,3 @@ changed.** What changed:
   which is the non-deprecated spelling of the same thing.
 - **`TEST_MODE` toggles removed** from the two CellRanger scripts.
 
-### Two corrections to what the original scripts did
-
-- **The cell-cycle fallback was not dead code — it ran.** Step 4 looked for
-  `s_genes.txt` / `g2m_genes.txt` under `$OAK/Users/opushkar/common_sc`, but the
-  files there are named `hs_cell_cycle_s_genes.txt` /
-  `hs_cell_cycle_g2m_genes.txt`. The `os.path.exists` check therefore failed and
-  the fallback branch executed: it downloaded `sc.datasets.pbmc3k_processed()`
-  (23.5 MB, visible in the Slurm stderr) and used the hardcoded in-script Tirosh
-  lists. The published run's `S genes found: 42, G2M genes found: 52` matches
-  those hardcoded lists, not the files on disk. Those exact lists are now
-  shipped as `references/cell_cycle_*.txt`, so the numbers are preserved and the
-  compute-node download is gone.
-- **Barcode intersection is now deterministic.** Steps 1 and 2 took shared
-  barcodes via `list(set(...))`, so cell *order* varied between runs. Both
-  modalities were subset with the same list, so GEX and guide stayed aligned and
-  results were correct — but the step was not reproducible. It is now `sorted()`.
-  A re-run will therefore not byte-match the April 2026 outputs; no re-run of
-  the original could have either.
