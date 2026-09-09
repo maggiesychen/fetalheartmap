@@ -5,10 +5,15 @@ CRISPRi Perturb-seq screen targeting congenital heart disease (CHD) genes.
 
 **Contact:** Maggie Chen (msychen@stanford.edu), Engreitz Lab
 
-**Current stage:** `00_counts_matrix_processing` — post-processing of the
-kallisto|bustools count matrices produced by the upstream perturb-seq pipeline.
-Later stages (guide assignment, SCEPTRE, cNMF, program-level DE, figures) will
-be added as `01_`…, `0N_` workflows.
+**Stages so far:**
+
+| Workflow | What it does |
+|---|---|
+| `00_counts_matrix_processing.smk` | kb counts → QC → clustering + CellRanger export |
+| `01_sceptre_trans.smk` | SCEPTRE calibration / power / discovery, cis and trans |
+| `02_per_guide_knockdown.smk` | per-gRNA knockdown of the CHD target panel |
+
+Still to come: cNMF and program-level DE, and the paper figures.
 
 ---
 
@@ -132,14 +137,25 @@ and picks up `~/.local/lib/python3.8/site-packages`. Build the environment from
 
 ```
 config/       one YAML per analysis; all paths and parameters live here
-references/   small inputs that ship with the code (sample table, gene lists)
-scripts/      argparse-driven step scripts, numbered in run order,
-              plus the shared helpers (pipeline_utils, snakemake_helpers)
+references/   small inputs that ship with the code (sample table, gene lists,
+              gRNA targets, Ensembl->symbol map)
+scripts/      step scripts, numbered in run order, plus shared helpers
+              (pipeline_utils.py, snakemake_helpers.py, r_utils.R, figstyle.py)
 workflows/    numbered Snakemake stages (*.smk)
 envs/         the orchestrator environment
 tests/        contract tests that run without the sequencing data
 submit.sh     Slurm submission wrapper
 ```
+
+Script numbers run across the whole analysis, not per stage: `01`–`04` are
+stage 00, `05`–`06` stage 01, `07` stage 02.
+
+R scripts take their arguments through `scripts/r_utils.R`, a ~100-line base-R
+parser. That is deliberate: the shared R library these scripts run against has
+neither `optparse` nor `getopt`, and its `argparse` is a reticulate wrapper
+around Python's, which would make every R script depend on a working Python
+inside R. The SCEPTRE pipeline's own scripts use plain `commandArgs()` for the
+same reason.
 
 Paths under `config/` and `references/` resolve relative to this code
 directory. Runtime paths (`scratch_base`, `results_base`) resolve relative to

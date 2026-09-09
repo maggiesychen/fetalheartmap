@@ -19,9 +19,26 @@ WORKFLOW_DIR_NAME = "workflows"
 # roots appearing in a .py or .smk file is a regression.
 FORBIDDEN_PATH_PATTERN = re.compile(r"[\"'](/oak/|/scratch/|/home/|/share/)")
 
+# Library modules, not argparse-driven step scripts.
+HELPER_MODULES = {
+    "pipeline_utils.py",
+    "snakemake_helpers.py",
+    "figstyle.py",
+    "__init__.py",
+    "r_utils.R",
+}
+
 
 def python_scripts(code_dir):
     return sorted((code_dir / SCRIPT_DIR_NAME).glob("*.py"))
+
+
+def r_scripts(code_dir):
+    return sorted((code_dir / SCRIPT_DIR_NAME).glob("*.R"))
+
+
+def all_scripts(code_dir):
+    return python_scripts(code_dir) + r_scripts(code_dir)
 
 
 def workflow_files(code_dir):
@@ -55,20 +72,58 @@ def test_every_script_has_a_module_docstring(code_dir):
 
 def test_step_scripts_are_argparse_driven(code_dir):
     """Every step script must take its inputs and outputs on the command line."""
-    helpers = {"pipeline_utils.py", "snakemake_helpers.py", "__init__.py"}
     for path in python_scripts(code_dir):
-        if path.name in helpers:
+        if path.name in HELPER_MODULES:
             continue
         source = path.read_text()
         assert "argparse.ArgumentParser" in source, f"{path.name} has no argparse"
-        assert '--output' in source or '--output-dir' in source, (
-            f"{path.name} has no --output/--output-dir argument"
+        assert "--output" in source, f"{path.name} has no --output argument"
+
+
+def test_r_scripts_are_cli_driven(code_dir):
+    """R step scripts take their inputs on the command line, via r_utils.R.
+
+    Deliberately not optparse: the shared R library has neither optparse nor
+    getopt, so `scripts/r_utils.R` provides a base-R parser instead.
+    """
+    for path in r_scripts(code_dir):
+        if path.name in HELPER_MODULES:
+            continue
+        source = path.read_text()
+        assert "parse_cli_args" in source, f"{path.name} does not use parse_cli_args"
+        assert 'source(file.path(this_script_dir_bootstrap(), "r_utils.R"))' in source, (
+            f"{path.name} does not source r_utils.R"
+        )
+        assert "output" in source, f"{path.name} declares no output option"
+
+
+def test_r_helper_has_no_package_dependencies(code_dir):
+    """r_utils.R must stay dependency-free -- that is its whole purpose."""
+    source = (code_dir / "scripts" / "r_utils.R").read_text()
+    for line in source.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        assert not stripped.startswith(("library(", "require(")), (
+            f"r_utils.R must not load packages: {stripped}"
+        )
+
+
+def test_r_scripts_have_a_header_comment(code_dir):
+    """Every R script opens with a `##` block explaining what it does."""
+    for path in r_scripts(code_dir):
+        lines = [
+            line for line in path.read_text().splitlines()
+            if line.strip() and not line.startswith("#!")
+        ]
+        assert lines and lines[0].startswith("#"), (
+            f"{path.name} has no header comment"
         )
 
 
 def test_no_hardcoded_absolute_paths_in_code(code_dir):
     offenders = []
-    for path in python_scripts(code_dir) + workflow_files(code_dir):
+    for path in all_scripts(code_dir) + workflow_files(code_dir):
         for lineno, line in enumerate(path.read_text().splitlines(), start=1):
             stripped = line.strip()
             if stripped.startswith("#"):
@@ -93,11 +148,11 @@ def test_workflow_script_references_exist(code_dir):
 
 def test_every_script_is_referenced_by_a_workflow(code_dir):
     """Guards against scripts that quietly fall out of the DAG."""
-    helpers = {"pipeline_utils.py", "snakemake_helpers.py", "__init__.py"}
+    helpers = HELPER_MODULES
     workflow_text = "\n".join(p.read_text() for p in workflow_files(code_dir))
     orphans = [
         path.name
-        for path in python_scripts(code_dir)
+        for path in all_scripts(code_dir)
         if path.name not in helpers and path.name not in workflow_text
     ]
     assert not orphans, f"scripts not referenced by any workflow: {orphans}"

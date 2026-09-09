@@ -88,6 +88,152 @@ clustering:
          SOX17, CXCR4, DLL4, EFNB2,
          NR2F2, NT5E, FLRT2]
 
+# --- Stage 01: SCEPTRE -------------------------------------------------------
+sceptre:
+  # Which stage-00 CellRanger export to import. Must be the feature-corrected
+  # one: import_data_from_cellranger() indexes features positionally across
+  # directories, so all sublibraries need an identical features.tsv.gz.
+  cellranger_export: cellranger_format_featurecorrected
+  ondisc_dir: sceptre_ondisc        # under results_base
+  base_object: sceptre_object.rds   # written by the import rule
+  moi: high
+  guide_targets_file: references/guide_targets.20260408_ipscvic_300k.tsv
+  ens2symbol_file: references/ens2symbol_v43.tsv
+
+  # GENCODE annotation, used only to restrict trans discovery pairs to
+  # protein-coding responses. 53 MB, so not shipped with this repo.
+  gencode_gtf: /oak/stanford/groups/engreitz/Users/yannick/CC4D_2/trans_sceptre2/gencode_ref/gencode.v43.chr_patch_hapl_scaff.annotation.gtf.gz
+
+  # R toolchain for the sceptre/ondisc/rtracklayer scripts. sceptre is not on
+  # CRAN-by-default here; the published run used a shared library.
+  r_env:
+    modules: gcc/12.4.0 R/4.3.2
+    r_libs_user: /oak/stanford/groups/engreitz/Users/yannick/R_pkgs
+
+  # Per-cell covariates are read out of the stage-00 clustered AnnData and
+  # attached to the sceptre object *positionally*, in CellRanger import order.
+  # Only `leiden_res0_25` depends on which clustering file is used: S_score,
+  # G2M_score, pct_ribo and pct_mito are byte-identical between the
+  # cc-regressed and no-regression outputs (verified 2026-09-08), whereas the
+  # res-0.25 Leiden labels differ for 83.5% of cells (6 clusters vs 5).
+  # The published trans_v2/trans_v3 runs used the cc-regressed file.
+  covariates:
+    clustered_h5ad: /oak/stanford/groups/engreitz/Users/msychen/fetalheartmap/20260408-FEBVICHIGHIMOI-300kchd-d9-novaseq/countsmatrices/20260408-postprocessing/4.clustering/clustered_data/300k_combined_clustered_ccregressed.h5ad
+    # CellRanger writes BARCODE_{sublibrary}; the h5ad carries
+    # BARCODE_300k_{sublibrary}. This infix bridges the two.
+    barcode_h5ad_infix: _300k
+    # output covariate name -> h5ad obs column
+    columns:
+      S_score: S_score
+      G2M_score: G2M_score
+      pct_ribo: pct_counts_ribo
+      pct_mito: pct_counts_mt
+      leiden_res0_25: leiden_res0_25
+
+  # Shared association parameters (sceptre defaults are used for anything
+  # omitted). These matched across every published run.
+  analysis:
+    side: both
+    resampling_mechanism: permutations
+    control_group: complement
+    grna_integration_strategy: union
+    multiple_testing_alpha: 0.1
+
+  # One entry per analysis variant. `extra_covariates` are appended to the
+  # association formula on top of sceptre's depth + batch terms; anything
+  # listed in `categorical_covariates` is coerced to a factor first.
+  variants:
+    trans_v2:
+      description: trans, cell-state covariates, no Leiden cluster (canonical)
+      pair_type: trans
+      protein_coding_only: true
+      extra_covariates: [S_score, G2M_score, pct_ribo, pct_mito]
+      categorical_covariates: []
+    trans_v3:
+      description: trans, cell-state covariates plus Leiden cluster as a factor
+      pair_type: trans
+      protein_coding_only: true
+      extra_covariates: [S_score, G2M_score, pct_ribo, pct_mito, leiden_res0_25]
+      categorical_covariates: [leiden_res0_25]
+    cis:
+      description: cis (1 Mb), sceptre default covariates only
+      pair_type: cis
+      distance_threshold: 1000000
+      protein_coding_only: false
+      extra_covariates: []
+      categorical_covariates: []
+
+  # Which variants `rule all` builds.
+  run_variants: [trans_v2]
+
+  # The Nextflow implementation of the SCEPTRE pipeline does the heavy lifting.
+  pipeline:
+    repo: timothy-barry/sceptre-pipeline
+    revision: main
+    grna_assignment_method: mixture
+    # "" leaves gRNA assignment on sceptre's auto-constructed default
+    # (transcriptome depth + gRNA depth + batch). Cell-state covariates are
+    # deliberately NOT included here -- see readmes/20260908-methods.md in the
+    # analysis directory for why, and for how to override this. Setting a path
+    # to an .rds holding a formula object passes it to assign_grnas().
+    grna_assignment_formula: ""
+    pair_pod_size: 50000
+    grna_pod_size: 25
+    n_calibration_pairs: 400000
+    work_dir_base: /scratch/users/msychen/nextflow_work
+    nxf_opts: -Xms500M -Xmx4G
+    java_module: java/21.0.4
+
+# --- Stage 02: per-guide knockdown -------------------------------------------
+# Per-gRNA knockdown of the CHD target panel, for the TSS-targeting gRNAs
+# against the non-targeting pool. Two independent estimators that agree:
+# a Poisson GLM log2 fold change, and a model-free CP10K pseudobulk.
+per_guide_knockdown:
+  # Which SCEPTRE variant supplies the gRNA assignment and the pair sets.
+  # The published figure used the cis run, but gRNA assignment is identical
+  # across variants -- verified 2026-09-08, 0 of 727,847,504 cell x gRNA calls
+  # differ once the permuted gRNA row order is aligned -- so trans_v2 gives the
+  # same assignment. See 6.sceptre/readmes/20260908-methods.md in the analysis
+  # directory.
+  sceptre_variant: trans_v2
+
+  chd_gene_table: references/chd_genes.suppt8.tsv
+  chd_gene_column: Gene Name
+  # Genes flagged in this column with `vic_expressed_value` form the main
+  # figure panel; the rest are kept for the all-genes supplementary version.
+  vic_expressed_column: Highly Expressed in VICs
+  vic_expressed_value: "Yes"
+
+  # Label used in the gRNA target table for non-targeting controls, and the
+  # pattern that identifies a gene/TSS target.
+  nt_target_label: non-targeting
+  tss_target_regex: "^ENSG"
+
+  # Poisson GLM for the per-gRNA fold change. Offset/covariates only; the
+  # treatment indicator is added per gRNA.
+  poisson:
+    covariate_formula: ~ batch + log(response_n_umis)
+    min_cells_per_guide: 5
+
+  # Model-free pseudobulk branch.
+  expression:
+    cp10k_scale: 10000
+    min_cells_per_guide: 5
+
+  plots:
+    # Genes dropped from the combined bar figure. Preserved from the published
+    # figure; NOTCH2 has a single TSS gRNA in the library so its estimate is
+    # n = 1, and the other three were excluded on the same figure-scope call.
+    exclude_genes: [ARID1B, NOTCH2, FBN1, ZEB2]
+    # Percentiles of the non-targeting per-gRNA distribution drawn as a band.
+    ntc_percentiles: [5, 95]
+    # Reference lines, as remaining expression fractions (50% and 75% KD).
+    kd_reference_fractions: [0.50, 0.25]
+    random_seed: 20260826
+    fdr_threshold: 0.05
+    base_font_size: 8
+    gene_label_pt: 13
+
 # --- Slurm resources ---------------------------------------------------------
 # Consumed by submit.sh via --cluster. runtime is in minutes.
 resources:
@@ -125,4 +271,48 @@ resources:
     mem_mb: 131072
     threads: 4
     runtime: 1440
+    slurm_partition: engreitz
+  # --- stage 01: SCEPTRE ---
+  sceptre_import:
+    mem_mb: 131072
+    threads: 4
+    runtime: 240
+    slurm_partition: engreitz
+  sceptre_covariates:
+    mem_mb: 131072
+    threads: 2
+    runtime: 120
+    slurm_partition: engreitz
+  sceptre_setparams:
+    mem_mb: 131072
+    threads: 2
+    runtime: 240
+    slurm_partition: engreitz
+  # The Nextflow wrapper mostly waits on its own subjobs, so it needs a long
+  # walltime and very little memory.
+  sceptre_pipeline:
+    mem_mb: 10240
+    threads: 1
+    runtime: 4320
+    slurm_partition: engreitz
+  sceptre_export:
+    mem_mb: 32768
+    threads: 1
+    runtime: 60
+    slurm_partition: engreitz
+  # --- stage 02: per-guide knockdown ---
+  knockdown_poisson:
+    mem_mb: 98304
+    threads: 4
+    runtime: 240
+    slurm_partition: engreitz
+  knockdown_expression:
+    mem_mb: 98304
+    threads: 4
+    runtime: 120
+    slurm_partition: engreitz
+  knockdown_plot:
+    mem_mb: 8192
+    threads: 2
+    runtime: 30
     slurm_partition: engreitz

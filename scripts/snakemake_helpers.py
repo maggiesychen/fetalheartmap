@@ -12,8 +12,11 @@ from pipeline_utils import (  # noqa: E402
 )
 
 __all__ = [
+    "get_base_shell_prefix",
     "get_counts_h5ad",
     "get_logs_path",
+    "get_python_env_prefix",
+    "get_r_env_prefix",
     "get_resources",
     "get_results_path",
     "get_scratch_path",
@@ -96,6 +99,60 @@ def get_shell_prefix(config, code_dir):
     parts.append(
         f'export PYTHONPATH="{code_dir}${{{{PYTHONPATH:+:$PYTHONPATH}}}}"'
     )
+    return "; ".join(parts) + "; "
+
+
+def get_base_shell_prefix(code_dir):
+    """Minimal prefix: strict mode plus PYTHONPATH, no environment activation.
+
+    Use this for workflows that mix Python and R rules, and give each rule its
+    own environment via ``get_python_env_prefix`` / ``get_r_env_prefix``.
+    Braces are doubled because Snakemake formats the prefix.
+    """
+    return (
+        "set -euo pipefail; "
+        f'export PYTHONPATH="{code_dir}${{{{PYTHONPATH:+:$PYTHONPATH}}}}"; '
+    )
+
+
+def get_python_env_prefix(config):
+    """Activate the analysis conda environment for one rule."""
+    conda = config.get("conda", {})
+    env = conda.get("env")
+    if not env:
+        return ""
+    parts = []
+    profile_script = conda.get("profile_script")
+    if profile_script:
+        # conda activate needs the hook sourced, and the hook is not -u safe.
+        parts.append(f"set +u; source {profile_script}; set -u")
+    parts.append(f"conda activate {env}")
+    return "; ".join(parts) + "; "
+
+
+def get_r_env_prefix(config, section="sceptre"):
+    """Load the R toolchain for one rule, from ``config[section]['r_env']``.
+
+    Lmod is not always initialised in a non-interactive shell, so the module
+    function is sourced first when missing. Neither Lmod nor conda tolerate
+    ``set -u``, hence the guards.
+    """
+    r_env = config.get(section, {}).get("r_env", {})
+    modules = r_env.get("modules")
+    r_libs = r_env.get("r_libs_user")
+
+    parts = ["set +u"]
+    if modules:
+        parts.append(
+            "if ! command -v module >/dev/null 2>&1; then "
+            "source /etc/profile.d/modules.sh; fi"
+        )
+        parts.append(f"module load {modules}")
+    parts.append("set -u")
+    if r_libs:
+        parts.append(f"export R_LIBS_USER={r_libs}")
+    # Cairo devices need these on Sherlock or plotting silently fails.
+    parts.append("export R_DEFAULT_DEVICE=cairo")
     return "; ".join(parts) + "; "
 
 
