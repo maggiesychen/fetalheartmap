@@ -10,7 +10,7 @@ CRISPRi Perturb-seq screen targeting congenital heart disease (CHD) genes.
 | Workflow | What it does |
 |---|---|
 | `00_counts_matrix_processing.smk` | kb counts → QC → clustering + CellRanger export |
-| `01_sceptre_trans.smk` | SCEPTRE calibration / power / discovery, cis and trans |
+| `01_sceptre_trans.smk` | SCEPTRE trans: calibration check, power check, discovery |
 | `02_per_guide_knockdown.smk` | per-gRNA knockdown of the CHD target panel |
 
 ---
