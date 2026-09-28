@@ -129,30 +129,6 @@ Covariate sets and pair types are declared under `sceptre.variants`;
 `sceptre.run_variants` picks which ones `rule all` builds. The default is
 `trans_v2` — cell-state covariates, no Leiden cluster.
 
-### Two things about the model that are easy to get wrong
-
-**The association formula is passed explicitly.** Left to sceptre's
-auto-construction, `auto_construct_formula_object()` silently drops any
-continuous covariate with ≥ 15 distinct values — which is all four cell-state
-covariates — with no warning and nothing in the printed object summary to show
-it happened.
-
-**gRNA assignment does not use those covariates, deliberately.**
-`assign_grnas()` never reads the association formula; it builds its own default
-adjusting for transcriptome depth, gRNA depth and batch. Cell-state covariates
-belong in the association model because they describe the transcriptomic
-response rather than gRNA capture efficiency, and are potentially downstream of
-the perturbation itself. To override, point
-`sceptre.pipeline.grna_assignment_formula` at an `.rds` holding a formula
-object. Full write-up in the analysis directory at
-`6.sceptre/readmes/20260908-methods.md`.
-
-Also worth knowing: sceptre's built-in `response_p_mito` covariate is
-identically zero here, because the feature-corrected export writes Ensembl IDs
-into the feature *name* column so no `MT-` symbols are visible to sceptre. The
-`pct_mito` supplied by `05_extract_sceptre_covariates.py` is the working
-mitochondrial covariate.
-
 ---
 
 ## Stage 02 — per-gRNA knockdown
