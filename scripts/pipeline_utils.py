@@ -188,25 +188,18 @@ def benjamini_hochberg(pvalues):
     Factored out because the per-guide knockdown plots each carried a private
     copy. NaN inputs stay NaN and are excluded from the correction, so the
     number of tests is the number of genes that actually produced a p-value.
+    The correction itself is scipy's; this wrapper only adds the NaN handling,
+    which scipy.stats.false_discovery_control does not do.
     """
+    # Imported here, not at module level: the contract CI job imports this
+    # module without scipy installed.
+    from scipy import stats
+
     p = np.asarray(pvalues, dtype=float)
     out = np.full(p.shape, np.nan)
     finite = np.isfinite(p)
-    if not finite.any():
-        return out
-
-    values = p[finite]
-    n = values.size
-    order = np.argsort(values)
-    ranked = values[order]
-    adjusted = ranked * n / (np.arange(n) + 1)
-    # Enforce monotonicity from the largest p-value downwards.
-    adjusted = np.minimum.accumulate(adjusted[::-1])[::-1]
-    adjusted = np.clip(adjusted, 0, 1)
-
-    restored = np.empty(n)
-    restored[order] = adjusted
-    out[finite] = restored
+    if finite.any():
+        out[finite] = stats.false_discovery_control(p[finite], method="bh")
     return out
 
 
